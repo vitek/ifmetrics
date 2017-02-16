@@ -70,7 +70,7 @@ int enumerate_callback(struct nlmsghdr *n, void *u) {
     return 0;
 }
 
-int enumerate(int s, int ifn) {
+int enumerate(int s, int ifn, int family) {
     struct {
         struct nlmsghdr n;
         struct rtmsg r;
@@ -82,7 +82,7 @@ int enumerate(int s, int ifn) {
     req.n.nlmsg_flags = NLM_F_REQUEST|NLM_F_MATCH;
     req.n.nlmsg_type = RTM_GETROUTE;
     
-    req.r.rtm_family = AF_INET;
+    req.r.rtm_family = family;
     req.r.rtm_table = RT_TABLE_MAIN;
     
     return netlink_request(s, (struct nlmsghdr*) &req, enumerate_callback, &ifn);
@@ -140,7 +140,7 @@ int add_route(int s, struct nlmsghdr* n) {
 }
 
 
-int go(char *iface, int metric) {
+int go(char *iface, int family, int metric) {
     int r = -1, j;
     int s = -1, ifn;
 
@@ -151,7 +151,7 @@ int go(char *iface, int metric) {
         goto finish;
 
     n_routes = 0;
-    if (enumerate(s, ifn) < 0)
+    if (enumerate(s, ifn, family) < 0)
         goto finish;
 
     if (n_routes) {
@@ -174,31 +174,53 @@ finish:
     return r;
 }
 
+
+static void usage(const char *prog)
+{
+    const char *b;
+
+    if ((b = strrchr(prog, '/')))
+        b++;
+    else
+        b = prog;
+
+    printf("Usage: %s [-6] <iface> [metric]\n"
+           "\n"
+           "%s is a tool for setting the metrics of all IPv4 or IPv6 routes\n"
+           "attached to a given network interface at once.\n"
+           "\n"
+           "   -6         Set IPv6 metric, IPv4 is default\n"
+           "   <iface>    The interface\n"
+           "   <metric>   The new metric (default: 0)\n", b, b);
+}
+
 int main(int argc, char *argv[]) {
     char *iface;
     int metric;
+    int optind;
+    int family = AF_INET;
 
-    if (argc <= 1 || (argc > 1 && (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help")))) {
-        char *b;
-        
-        if ((b = strrchr(argv[0], '/')))
-            b++;
-        else
-            b = argv[0];
-        
-        printf("Usage: %s <iface> [metric]\n"
-               "\n"
-               "%s is a tool for setting the metrics of all IPv4 routes\n"
-               "attached to a given network interface at once.\n"
-               "\n"
-               "   <iface>    The interface\n"
-               "   <metric>   The new metric (default: 0)\n", b, b);
+    for (optind = 1; optind < argc; optind++) {
+        char *arg = argv[optind];
+
+        if (!strcmp(arg, "-6")) {
+            family = AF_INET6;
+        } else if (!strcmp(arg, "-h") || !strcmp(arg, "--help")) {
+            usage(argv[0]);
+            return 0;
+        } else {
+            break;
+        }
+
+    }
+
+    if ((argc - optind) < 2) {
+        usage(argv[0]);
         return 0;
     }
-    
-    iface = argv[1];
-    metric = argc > 2 ? atoi(argv[2]) : 0;
 
-    return go(iface, metric) < 0 ? 1 : 0;
+    iface = argv[optind];
+    metric = argc > 2 ? atoi(argv[optind + 1]) : 0;
 
+    return go(iface, family, metric) < 0 ? 1 : 0;
 }
